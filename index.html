@@ -387,7 +387,7 @@
     }
 
     .transaction-amount.payment {
-      color: var(--green);
+      color: var(--danger);
     }
 
     .empty {
@@ -1018,7 +1018,9 @@
     }
 
     function money(amount) {
-      return `$${Number(amount || 0).toLocaleString("en-US", {
+      const value = Number(amount || 0);
+      const prefix = value < 0 ? "-$" : "$";
+      return `${prefix}${Math.abs(value).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       })}`;
@@ -1089,6 +1091,13 @@
     function currentBalance() {
       return cardTransactions
         .filter(transaction => !isPending(transaction))
+        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+    }
+
+    function pendingCreditHold() {
+      return cardTransactions
+        .filter(isPending)
+        .filter(transaction => Number(transaction.amount || 0) > 0)
         .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
     }
 
@@ -1185,7 +1194,7 @@
       const latestStatement = latestClosedStatement();
       const closingDate = nextClosingDate();
       const dashboardDueDate = latestStatement ? latestStatement.dueDate : (closingDate ? addDays(closingDate, 5) : null);
-      const availableCredit = Math.max(0, CREDIT_LIMIT - balance);
+      const availableCredit = Math.max(0, CREDIT_LIMIT - balance - pendingCreditHold());
 
       currentBalanceEl.textContent = money(balance);
       minimumPaymentDueEl.textContent = latestStatement ? money(latestStatement.balance) : "$0.00";
@@ -1447,7 +1456,7 @@
 
         ${hasEnough ? "" : `<div class="empty" style="color:#ffb0b5;">Not enough miles. ${neededMiles.toLocaleString("en-US")} miles required.</div>`}
 
-        <div class="transaction-subtitle" style="margin-top:14px;text-align:center;">Conversion rate: ${MILES_PER_DOLLAR.toLocaleString("en-US")} miles = $1.00</div>
+        <div class="transaction-subtitle" style="margin-top:14px;text-align:center;">${money(selectedPaymentAmount)} = ${neededMiles.toLocaleString("en-US")} miles</div>
 
         <button class="pill-btn primary" id="confirmPaymentButton" type="button" style="width:100%;margin-top:24px;" ${hasEnough ? "" : "disabled"}>Pay ${money(selectedPaymentAmount)} Today</button>
       `;
