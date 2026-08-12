@@ -1087,7 +1087,9 @@
     }
 
     function currentBalance() {
-      return Number(cardAccount.currentBalance || 0);
+      return cardTransactions
+        .filter(transaction => !isPending(transaction))
+        .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
     }
 
     function getFirstTransactionDate() {
@@ -1181,12 +1183,14 @@
     function renderDashboard() {
       const balance = currentBalance();
       const latestStatement = latestClosedStatement();
+      const closingDate = nextClosingDate();
+      const dashboardDueDate = latestStatement ? latestStatement.dueDate : (closingDate ? addDays(closingDate, 5) : null);
       const availableCredit = Math.max(0, CREDIT_LIMIT - balance);
 
       currentBalanceEl.textContent = money(balance);
       minimumPaymentDueEl.textContent = latestStatement ? money(latestStatement.balance) : "$0.00";
-      paymentDueDateEl.textContent = latestStatement ? shortDate(latestStatement.dueDate) : "--";
-      nextClosingDateEl.textContent = shortDate(nextClosingDate());
+      paymentDueDateEl.textContent = shortDate(dashboardDueDate);
+      nextClosingDateEl.textContent = shortDate(closingDate);
       availableCreditEl.textContent = money(availableCredit);
       statementBalanceEl.textContent = latestStatement ? money(latestStatement.balance) : "$0.00";
 
@@ -1443,6 +1447,8 @@
 
         ${hasEnough ? "" : `<div class="empty" style="color:#ffb0b5;">Not enough miles. ${neededMiles.toLocaleString("en-US")} miles required.</div>`}
 
+        <div class="transaction-subtitle" style="margin-top:14px;text-align:center;">Conversion rate: ${MILES_PER_DOLLAR.toLocaleString("en-US")} miles = $1.00</div>
+
         <button class="pill-btn primary" id="confirmPaymentButton" type="button" style="width:100%;margin-top:24px;" ${hasEnough ? "" : "disabled"}>Pay ${money(selectedPaymentAmount)} Today</button>
       `;
 
@@ -1471,6 +1477,7 @@
       try {
         const batch = writeBatch(db);
         const paymentRef = doc(collection(db, "cardTransactions"));
+        const milesTransactionRef = doc(collection(db, "mileTransactions"));
 
         batch.set(
           doc(db, "cardAccount", "aviatorReserve"),
@@ -1503,6 +1510,15 @@
           createdAt: serverTimestamp(),
           postedAt: serverTimestamp(),
           updatedAt: serverTimestamp()
+        });
+
+        batch.set(milesTransactionRef, {
+          type: "spent",
+          icon: "cc",
+          title: "Aviator Reserve Payment",
+          amount: neededMiles,
+          cardTransactionId: paymentRef.id,
+          createdAt: serverTimestamp()
         });
 
         await batch.commit();
