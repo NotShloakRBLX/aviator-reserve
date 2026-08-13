@@ -139,6 +139,52 @@
       margin: 0 auto;
     }
 
+    .payment-status-card {
+      margin-top: 18px;
+      min-height: 76px;
+      padding: 16px 18px;
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,.12);
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.085), rgba(255,255,255,.035)),
+        rgba(18,25,40,.90);
+      box-shadow: 0 18px 50px rgba(0,0,0,.30);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .payment-status-icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border: 2px solid rgba(37,215,130,.72);
+      color: var(--green);
+      background: rgba(37,215,130,.08);
+    }
+
+    .payment-status-card.due .payment-status-icon {
+      border-color: rgba(224,184,96,.78);
+      color: var(--gold);
+      background: rgba(224,184,96,.10);
+    }
+
+    .payment-status-icon svg {
+      width: 25px;
+      height: 25px;
+      fill: currentColor;
+    }
+
+    .payment-status-title {
+      font-size: 21px;
+      line-height: 1.1;
+      font-weight: 900;
+      letter-spacing: -.025em;
+    }
+
     .account-card {
       margin-top: 22px;
       padding: 22px 20px 16px;
@@ -842,6 +888,15 @@
         <img class="credit-card-img" src="cc.png" alt="Aviator Reserve card" />
       </div>
 
+      <section class="payment-status-card" id="paymentStatusCard">
+        <div class="payment-status-icon" id="paymentStatusIcon">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9.55 16.2 5.8 12.45a1 1 0 1 1 1.4-1.42l2.35 2.35 7.25-7.25a1 1 0 0 1 1.42 1.42L9.55 16.2Z" />
+          </svg>
+        </div>
+        <div class="payment-status-title" id="paymentStatusTitle">No payment due</div>
+      </section>
+
       <section class="account-card" id="accountCard">
         <div class="account-slider" id="accountSlider">
           <div class="account-face credit">
@@ -856,6 +911,10 @@
               <div class="data-row">
                 <span>Payment due date</span>
                 <strong id="paymentDueDate">--</strong>
+              </div>
+              <div class="data-row">
+                <span>Remaining statement balance</span>
+                <strong id="remainingStatementBalance">$0.00</strong>
               </div>
             </div>
 
@@ -878,6 +937,11 @@
                   <div class="data-row">
                     <span>Total credit limit</span>
                     <strong>$20,000.00</strong>
+                  </div>
+                  <div class="details-line"></div>
+                  <div class="data-row">
+                    <span>Purchase APR</span>
+                    <strong>19.49%</strong>
                   </div>
                 </div>
               </div>
@@ -1071,6 +1135,9 @@
     const OWNER_UID = "VUyX2rFavOc2wL06uM3icLUTqyW2";
     const CREDIT_LIMIT = 20000;
     const MILES_PER_DOLLAR = 25;
+    const MINIMUM_PAYMENT_DUE = 25;
+    const PURCHASE_APR = 0.1949;
+    const DAILY_INTEREST_RATE = PURCHASE_APR / 365;
 
     const pages = {
       dashboard: document.getElementById("dashboardPage"),
@@ -1080,10 +1147,14 @@
     };
 
     const accountCard = document.getElementById("accountCard");
+    const paymentStatusCard = document.getElementById("paymentStatusCard");
+    const paymentStatusIcon = document.getElementById("paymentStatusIcon");
+    const paymentStatusTitle = document.getElementById("paymentStatusTitle");
     const currentBalanceEl = document.getElementById("currentBalance");
     const reserveMilesBalanceEl = document.getElementById("reserveMilesBalance");
     const minimumPaymentDueEl = document.getElementById("minimumPaymentDue");
     const paymentDueDateEl = document.getElementById("paymentDueDate");
+    const remainingStatementBalanceEl = document.getElementById("remainingStatementBalance");
     const detailsPanel = document.getElementById("detailsPanel");
     const showDetailsButton = document.getElementById("showDetailsButton");
     const nextClosingDateEl = document.getElementById("nextClosingDate");
@@ -1100,11 +1171,13 @@
     let statements = [];
     let selectedPaymentAmount = 0;
     let selectedPaymentLabel = "";
+    let selectedPaymentKind = "";
     let activeStatement = null;
     let showingRewards = false;
     let touchStartX = 0;
     let touchStartY = 0;
     let selectedRedeemMode = "";
+    let applyingInterest = false;
 
     function showPage(name) {
       Object.values(pages).forEach(page => page.classList.remove("active"));
@@ -1191,9 +1264,17 @@
     }
 
     function currentBalance() {
-      return cardTransactions
+      const postedBalance = cardTransactions
         .filter(transaction => !isPending(transaction))
         .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
+      return Math.max(0, postedBalance + activeInterestAdjustment());
+    }
+
+    function activeInterestAdjustment() {
+      const latestStatement = latestClosedStatement();
+      if (!latestStatement || cardAccount.statementInterestCycleId !== latestStatement.id) return 0;
+      return Number(cardAccount.statementInterestAdjustment || 0);
     }
 
     function pendingCreditHold() {
@@ -1275,6 +1356,53 @@
       return statements.find(statement => statement.end <= now) || null;
     }
 
+    function getStatementPaymentInfo() {
+      const latestStatement = latestClosedStatement();
+
+      if (!latestStatement) {
+        return {
+          latestStatement: null,
+          statementBalance: 0,
+          remainingStatementBalance: 0,
+          remainingPrincipal: 0,
+          minimumDue: 0,
+          paid: 0,
+          interestAdjustment: 0
+        };
+      }
+
+      const paymentsAfterStatement = cardTransactions
+        .filter(transaction => !isPending(transaction))
+        .filter(isPayment)
+        .filter(transaction => getTransactionDate(transaction) > latestStatement.end);
+
+      const paid = paymentsAfterStatement.reduce((sum, transaction) => {
+        return sum + Math.abs(Number(transaction.amount || 0));
+      }, 0);
+
+      const interestAdjustment = activeInterestAdjustment();
+      const originalBalance = Number(latestStatement.balance || 0);
+      const remainingPrincipal = Math.max(0, originalBalance - paid);
+      const hasMadeStatementPayment = paid > 0;
+      const statementBalance = hasMadeStatementPayment ? 0 : originalBalance;
+      const remainingStatementBalance = hasMadeStatementPayment
+        ? Math.max(0, remainingPrincipal + interestAdjustment)
+        : 0;
+      const minimumDue = statementBalance > 0
+        ? Math.min(MINIMUM_PAYMENT_DUE, statementBalance)
+        : 0;
+
+      return {
+        latestStatement,
+        statementBalance,
+        remainingStatementBalance,
+        remainingPrincipal,
+        minimumDue,
+        paid,
+        interestAdjustment
+      };
+    }
+
     function nextClosingDate() {
       const first = getFirstTransactionDate();
       if (!first) return null;
@@ -1293,18 +1421,21 @@
 
     function renderDashboard() {
       const balance = currentBalance();
-      const latestStatement = latestClosedStatement();
+      const statementInfo = getStatementPaymentInfo();
+      const latestStatement = statementInfo.latestStatement;
       const closingDate = nextClosingDate();
       const dashboardDueDate = latestStatement ? latestStatement.dueDate : (closingDate ? addDays(closingDate, 5) : null);
       const availableCredit = Math.max(0, CREDIT_LIMIT - balance - pendingCreditHold());
 
       currentBalanceEl.textContent = money(balance);
       reserveMilesBalanceEl.textContent = Number(cardAccount.rewardsMiles || 0).toLocaleString("en-US");
-      minimumPaymentDueEl.textContent = latestStatement ? money(latestStatement.balance) : "$0.00";
+      minimumPaymentDueEl.textContent = money(statementInfo.minimumDue);
       paymentDueDateEl.textContent = shortDate(dashboardDueDate);
+      remainingStatementBalanceEl.textContent = money(statementInfo.remainingStatementBalance);
       nextClosingDateEl.textContent = shortDate(closingDate);
       availableCreditEl.textContent = money(availableCredit);
-      statementBalanceEl.textContent = latestStatement ? money(latestStatement.balance) : "$0.00";
+      statementBalanceEl.textContent = money(statementInfo.statementBalance);
+      renderPaymentStatus(statementInfo);
 
       const pending = cardTransactions
         .filter(isPending)
@@ -1316,6 +1447,89 @@
 
       renderTransactionList(pendingTransactionsEl, pending, true);
       renderTransactionList(completedTransactionsEl, completed, false);
+    }
+
+    function renderPaymentStatus(statementInfo) {
+      if (statementInfo.minimumDue > 0) {
+        paymentStatusCard.classList.add("due");
+        paymentStatusIcon.innerHTML = `
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 .01 20.01A10 10 0 0 0 12 2Zm1 5a1 1 0 1 0-2 0v5.05c0 .27.11.52.29.71l3.1 3.1a1 1 0 0 0 1.42-1.42L13 11.63V7Z" />
+          </svg>
+        `;
+        paymentStatusTitle.textContent = `${money(statementInfo.minimumDue)} minimum due ${shortDateNoYear(statementInfo.latestStatement?.dueDate)}`;
+        return;
+      }
+
+      paymentStatusCard.classList.remove("due");
+      paymentStatusIcon.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9.55 16.2 5.8 12.45a1 1 0 1 1 1.4-1.42l2.35 2.35 7.25-7.25a1 1 0 0 1 1.42 1.42L9.55 16.2Z" />
+        </svg>
+      `;
+      paymentStatusTitle.textContent = "No payment due";
+    }
+
+    async function applyDailyInterestIfNeeded() {
+      if (applyingInterest) return;
+
+      const statementInfo = getStatementPaymentInfo();
+      const statement = statementInfo.latestStatement;
+
+      if (!statement || statementInfo.paid <= 0 || statementInfo.remainingPrincipal <= 0) return;
+
+      applyingInterest = true;
+
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const storedCycleId = cardAccount.statementInterestCycleId || "";
+        const lastApplied = storedCycleId === statement.id ? toDate(cardAccount.lastInterestAppliedAt) : null;
+
+        if (!lastApplied) {
+          await writeBatch(db)
+            .set(
+              doc(db, "cardAccount", "aviatorReserve"),
+              {
+                statementInterestCycleId: statement.id,
+                statementInterestAdjustment: 0,
+                lastInterestAppliedAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              },
+              { merge: true }
+            )
+            .commit();
+          return;
+        }
+
+        const lastDay = new Date(lastApplied);
+        lastDay.setHours(0, 0, 0, 0);
+
+        const daysElapsed = Math.floor((today - lastDay) / 86400000);
+        if (daysElapsed <= 0) return;
+
+        const interestBase = statementInfo.remainingPrincipal + statementInfo.interestAdjustment;
+        const interest = interestBase * DAILY_INTEREST_RATE * daysElapsed;
+        if (interest <= 0) return;
+
+        await writeBatch(db)
+          .set(
+            doc(db, "cardAccount", "aviatorReserve"),
+            {
+              statementInterestCycleId: statement.id,
+              statementInterestAdjustment: increment(interest),
+              lastInterestAppliedAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          )
+          .commit();
+      } catch (error) {
+        console.error("Interest update failed:", error);
+      } finally {
+        applyingInterest = false;
+      }
     }
 
     function renderTransactionList(container, items, pendingSection = false) {
@@ -1446,12 +1660,24 @@
     }
 
     function openPaymentSheet() {
-      const latestStatement = latestClosedStatement();
-      const now = new Date();
-      const canPayStatement = latestStatement && latestStatement.balance > 0 && now <= latestStatement.dueDate;
-      selectedPaymentAmount = canPayStatement ? latestStatement.balance : currentBalance();
-      selectedPaymentLabel = canPayStatement ? "Last statement balance" : "Current balance";
-      renderPaymentAmountStep(canPayStatement ? latestStatement.balance : 0);
+      const statementInfo = getStatementPaymentInfo();
+      const balance = currentBalance();
+
+      if (statementInfo.minimumDue > 0) {
+        selectedPaymentAmount = statementInfo.minimumDue;
+        selectedPaymentLabel = "Minimum payment due";
+        selectedPaymentKind = "minimum";
+      } else if (statementInfo.statementBalance > 0) {
+        selectedPaymentAmount = statementInfo.statementBalance;
+        selectedPaymentLabel = "Last statement balance";
+        selectedPaymentKind = "statement";
+      } else {
+        selectedPaymentAmount = balance;
+        selectedPaymentLabel = "Current balance";
+        selectedPaymentKind = "current";
+      }
+
+      renderPaymentAmountStep();
       paymentOverlay.classList.add("active");
     }
 
@@ -1459,11 +1685,13 @@
       paymentOverlay.classList.remove("active");
       selectedPaymentAmount = 0;
       selectedPaymentLabel = "";
+      selectedPaymentKind = "";
       selectedRedeemMode = "";
     }
 
-    function renderPaymentAmountStep(statementAmount) {
+    function renderPaymentAmountStep() {
       const balance = currentBalance();
+      const statementInfo = getStatementPaymentInfo();
       paymentSheet.innerHTML = `
         <div class="sheet-head">
           <div></div>
@@ -1473,12 +1701,17 @@
           </button>
         </div>
 
-        <button class="amount-choice ${selectedPaymentLabel === "Last statement balance" ? "selected" : ""}" id="statementPayChoice" ${statementAmount > 0 ? "" : "disabled"} type="button">
-          <strong>${money(statementAmount)}</strong>
+        <button class="amount-choice ${selectedPaymentKind === "minimum" ? "selected" : ""}" id="minimumPayChoice" ${statementInfo.minimumDue > 0 ? "" : "disabled"} type="button">
+          <strong>${money(statementInfo.minimumDue)}</strong>
+          <span>Minimum payment due</span>
+        </button>
+
+        <button class="amount-choice ${selectedPaymentKind === "statement" ? "selected" : ""}" id="statementPayChoice" ${statementInfo.statementBalance > 0 ? "" : "disabled"} type="button">
+          <strong>${money(statementInfo.statementBalance)}</strong>
           <span>Last statement balance</span>
         </button>
 
-        <button class="amount-choice ${selectedPaymentLabel === "Current balance" ? "selected" : ""}" id="currentPayChoice" ${balance > 0 ? "" : "disabled"} type="button">
+        <button class="amount-choice ${selectedPaymentKind === "current" ? "selected" : ""}" id="currentPayChoice" ${balance > 0 ? "" : "disabled"} type="button">
           <strong>${money(balance)}</strong>
           <span>Current balance</span>
         </button>
@@ -1487,15 +1720,23 @@
       `;
 
       document.getElementById("closePaymentButton").addEventListener("click", closePaymentSheet);
+      document.getElementById("minimumPayChoice").addEventListener("click", () => {
+        selectedPaymentAmount = statementInfo.minimumDue;
+        selectedPaymentLabel = "Minimum payment due";
+        selectedPaymentKind = "minimum";
+        renderPaymentAmountStep();
+      });
       document.getElementById("statementPayChoice").addEventListener("click", () => {
-        selectedPaymentAmount = statementAmount;
+        selectedPaymentAmount = statementInfo.statementBalance;
         selectedPaymentLabel = "Last statement balance";
-        renderPaymentAmountStep(statementAmount);
+        selectedPaymentKind = "statement";
+        renderPaymentAmountStep();
       });
       document.getElementById("currentPayChoice").addEventListener("click", () => {
         selectedPaymentAmount = balance;
         selectedPaymentLabel = "Current balance";
-        renderPaymentAmountStep(statementAmount);
+        selectedPaymentKind = "current";
+        renderPaymentAmountStep();
       });
       document.getElementById("paymentNextButton").addEventListener("click", renderPaymentMethodStep);
     }
@@ -1573,6 +1814,7 @@
     async function submitPayment() {
       const amount = Number(selectedPaymentAmount || 0);
       const neededMiles = dollarsToMiles(amount);
+      const statementInfo = getStatementPaymentInfo();
 
       if (!amount || milesBalance < neededMiles) return;
 
@@ -1595,7 +1837,6 @@
         batch.set(
           doc(db, "cardAccount", "aviatorReserve"),
           {
-            currentBalance: increment(-amount),
             creditLimit: CREDIT_LIMIT,
             last4: "7250",
             updatedAt: serverTimestamp()
@@ -1617,6 +1858,8 @@
           status: "approved",
           amount: -amount,
           milesUsed: neededMiles,
+          paymentKind: selectedPaymentKind || "current",
+          statementCycleId: statementInfo.latestStatement?.id || null,
           title: "Payment - Miles",
           cardName: "Aviator Reserve",
           cardLast4: "7250",
@@ -1787,7 +2030,6 @@
           batch.set(
             accountRef,
             {
-              currentBalance: increment(-redeemValue),
               creditLimit: CREDIT_LIMIT,
               last4: "7250",
               updatedAt: serverTimestamp()
@@ -1853,6 +2095,7 @@
       statements = buildStatements();
       renderDashboard();
       renderStatementsList();
+      applyDailyInterestIfNeeded();
     }
 
     function startApp() {
