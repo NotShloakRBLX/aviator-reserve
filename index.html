@@ -1178,6 +1178,7 @@
     let touchStartY = 0;
     let selectedRedeemMode = "";
     let applyingInterest = false;
+    let ownerAuthStarted = false;
 
     function showPage(name) {
       Object.values(pages).forEach(page => page.classList.remove("active"));
@@ -2168,22 +2169,28 @@
       }
     });
 
-    onAuthStateChanged(auth, user => {
-      const gate = document.getElementById("authGate");
+    setPersistence(auth, browserLocalPersistence).finally(() => {
+      onAuthStateChanged(auth, user => {
+        const gate = document.getElementById("authGate");
 
-      if (!user) {
-        gate.style.display = "grid";
-        return;
-      }
+        if (!user) {
+          gate.style.display = "grid";
+          return;
+        }
 
-      if (user.uid !== OWNER_UID) {
-        gate.style.display = "grid";
-        return;
-      }
+        console.log(`Signed in UID: ${user.uid}`);
 
-      gate.style.display = "none";
-      console.log(`Signed in UID: ${user.uid}`);
-      startApp();
+        if (user.uid !== OWNER_UID) {
+          gate.style.display = "grid";
+          return;
+        }
+
+        gate.style.display = "none";
+
+        if (ownerAuthStarted) return;
+        ownerAuthStarted = true;
+        startApp();
+      });
     });
   </script>
 </body>
