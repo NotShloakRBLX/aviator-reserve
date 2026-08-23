@@ -1331,7 +1331,7 @@
 
         const balance = Math.max(0, purchases - credits);
 
-        if (cycleEnd <= now || cycleTransactions.length) {
+        if (cycleEnd <= now && cycleTransactions.length) {
           cycles.push({
             id: `${cycleStart.toISOString().slice(0, 10)}_${cycleEnd.toISOString().slice(0, 10)}`,
             start: new Date(cycleStart),
@@ -1350,6 +1350,38 @@
       }
 
       return cycles.sort((a, b) => b.start - a.start);
+    }
+
+    function getOpenCycleRange() {
+      const first = getFirstTransactionDate();
+      if (!first) return null;
+
+      const now = new Date();
+      let start = new Date(first);
+      start.setHours(0, 0, 0, 0);
+
+      while (true) {
+        const end = addDays(start, 13);
+        end.setHours(23, 59, 59, 999);
+
+        if (end >= now) {
+          return {
+            start: new Date(start),
+            end
+          };
+        }
+
+        start = addDays(start, 14);
+        start.setHours(0, 0, 0, 0);
+      }
+    }
+
+    function isTransactionInOpenCycle(transaction) {
+      const range = getOpenCycleRange();
+      if (!range) return true;
+
+      const date = getTransactionDate(transaction);
+      return date >= range.start && date <= range.end;
     }
 
     function latestClosedStatement() {
@@ -1438,11 +1470,13 @@
       statementBalanceEl.textContent = money(statementInfo.statementBalance);
       renderPaymentStatus(statementInfo);
 
-      const pending = cardTransactions
+      const openCycleTransactions = cardTransactions.filter(isTransactionInOpenCycle);
+
+      const pending = openCycleTransactions
         .filter(isPending)
         .sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
 
-      const completed = cardTransactions
+      const completed = openCycleTransactions
         .filter(transaction => !isPending(transaction))
         .sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
 
