@@ -1293,27 +1293,38 @@
         .sort((a, b) => a - b)[0] || null;
     }
 
-    function buildStatements() {
+    function getFirstCycleStartDate() {
       const first = getFirstTransactionDate();
-      if (!first) return [];
+      if (!first) return null;
 
       const start = new Date(first);
       start.setHours(0, 0, 0, 0);
+      return start;
+    }
+
+    function getCycleCloseDate(cycleStart) {
+      const closeDate = addDays(cycleStart, 13);
+      closeDate.setHours(0, 0, 0, 0);
+      return closeDate;
+    }
+
+    function buildStatements() {
+      const start = getFirstCycleStartDate();
+      if (!start) return [];
 
       const now = new Date();
       const cycles = [];
       let cycleStart = start;
 
       while (cycleStart <= now) {
-        const cycleEnd = addDays(cycleStart, 13);
-        cycleEnd.setHours(23, 59, 59, 999);
+        const cycleEnd = getCycleCloseDate(cycleStart);
         const dueDate = addDays(cycleEnd, 5);
 
         const cycleTransactions = cardTransactions
           .filter(transaction => !isPending(transaction))
           .filter(transaction => {
             const date = getTransactionDate(transaction);
-            return date >= cycleStart && date <= cycleEnd;
+            return date >= cycleStart && date < cycleEnd;
           })
           .sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
 
@@ -1345,7 +1356,7 @@
           });
         }
 
-        cycleStart = addDays(cycleStart, 14);
+        cycleStart = new Date(cycleEnd);
         cycleStart.setHours(0, 0, 0, 0);
       }
 
@@ -1353,25 +1364,23 @@
     }
 
     function getOpenCycleRange() {
-      const first = getFirstTransactionDate();
+      const first = getFirstCycleStartDate();
       if (!first) return null;
 
       const now = new Date();
       let start = new Date(first);
-      start.setHours(0, 0, 0, 0);
 
       while (true) {
-        const end = addDays(start, 13);
-        end.setHours(23, 59, 59, 999);
+        const end = getCycleCloseDate(start);
 
-        if (end >= now) {
+        if (end > now) {
           return {
             start: new Date(start),
             end
           };
         }
 
-        start = addDays(start, 14);
+        start = new Date(end);
         start.setHours(0, 0, 0, 0);
       }
     }
@@ -1381,7 +1390,7 @@
       if (!range) return true;
 
       const date = getTransactionDate(transaction);
-      return date >= range.start && date <= range.end;
+      return date >= range.start && date < range.end;
     }
 
     function latestClosedStatement() {
@@ -1407,7 +1416,7 @@
       const paymentsAfterStatement = cardTransactions
         .filter(transaction => !isPending(transaction))
         .filter(isPayment)
-        .filter(transaction => getTransactionDate(transaction) > latestStatement.end);
+        .filter(transaction => getTransactionDate(transaction) >= latestStatement.end);
 
       const paid = paymentsAfterStatement.reduce((sum, transaction) => {
         return sum + Math.abs(Number(transaction.amount || 0));
@@ -1437,18 +1446,17 @@
     }
 
     function nextClosingDate() {
-      const first = getFirstTransactionDate();
+      const first = getFirstCycleStartDate();
       if (!first) return null;
 
       const now = new Date();
       let start = new Date(first);
-      start.setHours(0, 0, 0, 0);
 
       while (true) {
-        const end = addDays(start, 13);
-        end.setHours(23, 59, 59, 999);
-        if (end >= now) return end;
-        start = addDays(start, 14);
+        const end = getCycleCloseDate(start);
+        if (end > now) return end;
+        start = new Date(end);
+        start.setHours(0, 0, 0, 0);
       }
     }
 
