@@ -1445,6 +1445,14 @@
       };
     }
 
+    function payableStatementBalance(statementInfo) {
+      return Math.max(
+        0,
+        Number(statementInfo?.statementBalance || 0),
+        Number(statementInfo?.remainingStatementBalance || 0)
+      );
+    }
+
     function nextClosingDate() {
       const first = getFirstCycleStartDate();
       if (!first) return null;
@@ -1704,14 +1712,15 @@
 
     function openPaymentSheet() {
       const statementInfo = getStatementPaymentInfo();
+      const statementPayAmount = payableStatementBalance(statementInfo);
       const balance = currentBalance();
 
       if (statementInfo.minimumDue > 0) {
         selectedPaymentAmount = statementInfo.minimumDue;
         selectedPaymentLabel = "Minimum payment due";
         selectedPaymentKind = "minimum";
-      } else if (statementInfo.statementBalance > 0) {
-        selectedPaymentAmount = statementInfo.statementBalance;
+      } else if (statementPayAmount > 0) {
+        selectedPaymentAmount = statementPayAmount;
         selectedPaymentLabel = "Last statement balance";
         selectedPaymentKind = "statement";
       } else {
@@ -1735,6 +1744,7 @@
     function renderPaymentAmountStep() {
       const balance = currentBalance();
       const statementInfo = getStatementPaymentInfo();
+      const statementPayAmount = payableStatementBalance(statementInfo);
       paymentSheet.innerHTML = `
         <div class="sheet-head">
           <div></div>
@@ -1749,8 +1759,8 @@
           <span>Minimum payment due</span>
         </button>
 
-        <button class="amount-choice ${selectedPaymentKind === "statement" ? "selected" : ""}" id="statementPayChoice" ${statementInfo.statementBalance > 0 ? "" : "disabled"} type="button">
-          <strong>${money(statementInfo.statementBalance)}</strong>
+        <button class="amount-choice ${selectedPaymentKind === "statement" ? "selected" : ""}" id="statementPayChoice" ${statementPayAmount > 0 ? "" : "disabled"} type="button">
+          <strong>${money(statementPayAmount)}</strong>
           <span>Last statement balance</span>
         </button>
 
@@ -1770,7 +1780,7 @@
         renderPaymentAmountStep();
       });
       document.getElementById("statementPayChoice").addEventListener("click", () => {
-        selectedPaymentAmount = statementInfo.statementBalance;
+        selectedPaymentAmount = statementPayAmount;
         selectedPaymentLabel = "Last statement balance";
         selectedPaymentKind = "statement";
         renderPaymentAmountStep();
