@@ -1061,6 +1061,14 @@
             <span id="statementNewBalanceLabel">New balance</span>
             <strong id="statementNewBalance">$0.00</strong>
           </div>
+          <div class="data-row">
+            <span>Remaining statement balance</span>
+            <strong id="statementRemainingBalance">$0.00</strong>
+          </div>
+          <div class="data-row">
+            <span>Interest</span>
+            <strong id="statementInterest">$0.00</strong>
+          </div>
         </div>
       </section>
 
@@ -1308,6 +1316,36 @@
       return closeDate;
     }
 
+    function calculateCarriedBalanceInterest(startingBalance, payments, cycleStart, cycleEnd) {
+      let balance = Math.max(0, Number(startingBalance || 0));
+      let cursor = new Date(cycleStart);
+      let interest = 0;
+
+      payments
+        .map(transaction => ({
+          date: getTransactionDate(transaction),
+          amount: Math.abs(Number(transaction.amount || 0))
+        }))
+        .filter(payment => payment.date >= cycleStart && payment.date < cycleEnd && payment.amount > 0)
+        .sort((a, b) => a.date - b.date)
+        .forEach(payment => {
+          const paymentDay = new Date(payment.date);
+          paymentDay.setHours(0, 0, 0, 0);
+          const days = Math.max(0, Math.floor((paymentDay - cursor) / 86400000));
+
+          interest += balance * DAILY_INTEREST_RATE * days;
+          balance = Math.max(0, balance - payment.amount);
+          cursor = paymentDay;
+        });
+
+      const closingDay = new Date(cycleEnd);
+      closingDay.setHours(0, 0, 0, 0);
+      const remainingDays = Math.max(0, Math.floor((closingDay - cursor) / 86400000));
+      interest += balance * DAILY_INTEREST_RATE * remainingDays;
+
+      return Math.max(0, interest);
+    }
+
     function buildStatements() {
       const start = getFirstCycleStartDate();
       if (!start) return [];
@@ -1315,6 +1353,7 @@
       const now = new Date();
       const cycles = [];
       let cycleStart = start;
+      let carriedStatementBalance = 0;
 
       while (cycleStart <= now) {
         const cycleEnd = getCycleCloseDate(cycleStart);
@@ -1336,13 +1375,22 @@
           .filter(transaction => Number(transaction.amount || 0) < 0)
           .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount || 0)), 0);
 
+        const cyclePayments = cycleTransactions.filter(isPayment);
+
         const milesEarned = cycleTransactions
           .filter(transaction => Number(transaction.amount || 0) > 0)
           .reduce((sum, transaction) => sum + Number(transaction.milesEarned || 0), 0);
 
-        const balance = Math.max(0, purchases - credits);
+        const remainingStatementBalance = Math.max(0, carriedStatementBalance);
+        const interestAccrued = calculateCarriedBalanceInterest(
+          remainingStatementBalance,
+          cyclePayments,
+          cycleStart,
+          cycleEnd
+        );
+        const balance = Math.max(0, remainingStatementBalance + purchases + interestAccrued - credits);
 
-        if (cycleEnd <= now && cycleTransactions.length) {
+        if (cycleEnd <= now && (cycleTransactions.length || remainingStatementBalance > 0 || interestAccrued > 0)) {
           cycles.push({
             id: `${cycleStart.toISOString().slice(0, 10)}_${cycleEnd.toISOString().slice(0, 10)}`,
             start: new Date(cycleStart),
@@ -1351,9 +1399,15 @@
             transactions: cycleTransactions,
             purchases,
             credits,
+            remainingStatementBalance,
+            interestAccrued,
             balance,
             milesEarned
           });
+        }
+
+        if (cycleEnd <= now) {
+          carriedStatementBalance = balance;
         }
 
         cycleStart = new Date(cycleEnd);
@@ -1699,6 +1753,8 @@
       document.getElementById("statementPurchases").textContent = money(statement.purchases);
       document.getElementById("statementNewBalanceLabel").textContent = `New balance as of ${shortDateNoYear(statement.end)}`;
       document.getElementById("statementNewBalance").textContent = money(statement.balance);
+      document.getElementById("statementRemainingBalance").textContent = money(statement.remainingStatementBalance);
+      document.getElementById("statementInterest").textContent = money(statement.interestAccrued);
       document.getElementById("statementDueDate").textContent = shortDate(statement.dueDate);
       document.getElementById("statementMilesEarned").textContent = miles(statement.milesEarned);
 
