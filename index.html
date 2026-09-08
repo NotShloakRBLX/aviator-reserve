@@ -1273,11 +1273,22 @@
     }
 
     function currentBalance() {
+      const latestStatement = latestClosedStatement();
+
+      if (latestStatement) {
+        const postStatementActivity = cardTransactions
+          .filter(transaction => !isPending(transaction))
+          .filter(transaction => getTransactionDate(transaction) >= latestStatement.end)
+          .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
+        return Math.max(0, Number(latestStatement.balance || 0) + postStatementActivity + activeInterestAdjustment());
+      }
+
       const postedBalance = cardTransactions
         .filter(transaction => !isPending(transaction))
         .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 
-      return Math.max(0, postedBalance + activeInterestAdjustment());
+      return Math.max(0, postedBalance);
     }
 
     function activeInterestAdjustment() {
