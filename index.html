@@ -1563,7 +1563,7 @@
 
       const openCycleTransactions = cardTransactions.filter(isTransactionInOpenCycle);
 
-      const pending = openCycleTransactions
+      const pending = cardTransactions
         .filter(isPending)
         .sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
 
