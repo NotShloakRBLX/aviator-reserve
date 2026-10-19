@@ -1197,6 +1197,8 @@
     let selectedRedeemMode = "";
     let applyingInterest = false;
     let ownerAuthStarted = false;
+    let transactionsLoaded = false;
+    let emailLinkOpened = false;
 
     function showPage(name) {
       Object.values(pages).forEach(page => page.classList.remove("active"));
@@ -2227,6 +2229,20 @@
       renderDashboard();
       renderStatementsList();
       applyDailyInterestIfNeeded();
+      openEmailDestination();
+    }
+
+    function openEmailDestination() {
+      if (emailLinkOpened || !transactionsLoaded) return;
+      emailLinkOpened = true;
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("view") === "statement") {
+        const statement = statements.find(item => item.id === params.get("statement"));
+        if (statement) openStatement(statement);
+        else showPage("statements");
+      } else if (params.get("view") === "payment") {
+        openPaymentSheet();
+      }
     }
 
     function startApp() {
@@ -2247,6 +2263,7 @@
         snapshot.forEach(item => {
           cardTransactions.push({ id: item.id, ...item.data() });
         });
+        transactionsLoaded = true;
         refreshAll();
       });
     }
