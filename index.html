@@ -1272,6 +1272,7 @@
 
     function transactionName(transaction) {
       if (isPayment(transaction)) return "Payment - Miles";
+      if (transaction.tripId) return "MSFS Trips";
       return transaction.airlineName || transaction.airline || transaction.title || "Airline";
     }
 
@@ -1279,6 +1280,7 @@
       if (isPayment(transaction)) {
         return `<div class="coin-logo"></div>`;
       }
+      if (transaction.tripId) return '<img src="https://notshloakrblx.github.io/flight-planner/msfs-flight-operations-avatar.png" alt="MSFS Trips" />';
 
       const airline = transaction.airline || "";
       return `<img src="${getAirlineLogoPath(airline)}" alt="${airline} logo" onerror="this.style.display='none';" />`;
